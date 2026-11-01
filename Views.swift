@@ -1,11 +1,272 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Settings / Preferences View (Apple Inset-Grouped Native Style)
+
+struct SettingsView: View {
+    @ObservedObject var client: ProxyClient
+    @Binding var isShowing: Bool
+    
+    @State private var proxyURLInput: String = ""
+    @State private var secretKeyInput: String = ""
+    @State private var pollIntervalInput: Double = 5.0
+    @State private var isSecretRevealed: Bool = false
+    
+    @State private var isTesting: Bool = false
+    @State private var testResult: String? = nil
+    @State private var testSuccess: Bool = false
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top Navigation Bar
+            HStack {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isShowing = false
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Back")
+                            .font(.system(size: 12))
+                    }
+                    .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                
+                Spacer()
+                
+                Text("Preferences")
+                    .font(.system(size: 13, weight: .semibold))
+                
+                Spacer()
+                
+                Button(action: {
+                    saveAndClose()
+                }) {
+                    Text("Save")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 3.5)
+                        .background(Color.accentColor)
+                        .foregroundColor(.white)
+                        .cornerRadius(5)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            
+            Divider()
+                .overlay(Color(NSColor.separatorColor).opacity(0.3))
+            
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    // Group 1: Proxy Connection
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("PROXY CONNECTION")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 2)
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Server URL")
+                                    .font(.system(size: 11, weight: .medium))
+                                TextField("http://127.0.0.1:8317", text: $proxyURLInput)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 11, design: .monospaced))
+                                Text("Local endpoint or remote host (e.g. https://proxy.myserver.com)")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Divider()
+                                .overlay(Color(NSColor.separatorColor).opacity(0.15))
+                            
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Management Secret Key")
+                                    .font(.system(size: 11, weight: .medium))
+                                HStack(spacing: 6) {
+                                    if isSecretRevealed {
+                                        TextField("Secret Key", text: $secretKeyInput)
+                                            .textFieldStyle(.roundedBorder)
+                                            .font(.system(size: 11, design: .monospaced))
+                                    } else {
+                                        SecureField("Secret Key", text: $secretKeyInput)
+                                            .textFieldStyle(.roundedBorder)
+                                            .font(.system(size: 11, design: .monospaced))
+                                    }
+                                    
+                                    Button(action: { isSecretRevealed.toggle() }) {
+                                        Image(systemName: isSecretRevealed ? "eye.slash" : "eye")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.secondary)
+                                            .frame(width: 22, height: 22)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                HStack(spacing: 3) {
+                                    Image(systemName: "lock.shield")
+                                        .font(.system(size: 8.5))
+                                    Text("Encrypted & stored securely in macOS Keychain")
+                                        .font(.system(size: 9))
+                                }
+                                .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.5)
+                        )
+                    }
+                    
+                    // Group 2: Polling & Refresh
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("SYNC & REFRESH")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 2)
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Polling Interval")
+                                    .font(.system(size: 11, weight: .medium))
+                                Spacer()
+                                Text("\(Int(pollIntervalInput))s")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(.primary)
+                            }
+                            
+                            Slider(value: $pollIntervalInput, in: 1...30, step: 1)
+                            
+                            HStack {
+                                Text("1s (Fast)")
+                                    .font(.system(size: 8.5))
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("15s (Balanced)")
+                                    .font(.system(size: 8.5))
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("30s (Low Power)")
+                                    .font(.system(size: 8.5))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.5)
+                        )
+                    }
+                    
+                    // Group 3: Diagnostics & Connectivity Test
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("DIAGNOSTICS")
+                            .font(.system(size: 9.5, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .padding(.leading, 2)
+                        
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Button(action: {
+                                    runTest()
+                                }) {
+                                    HStack(spacing: 5) {
+                                        if isTesting {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                        } else {
+                                            Image(systemName: "network")
+                                                .font(.system(size: 11))
+                                        }
+                                        Text(isTesting ? "Testing…" : "Test Connection")
+                                            .font(.system(size: 11, weight: .medium))
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 4.5)
+                                    .background(Color(NSColor.separatorColor).opacity(0.15))
+                                    .cornerRadius(5)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isTesting)
+                                
+                                Spacer()
+                            }
+                            
+                            if let msg = testResult {
+                                HStack(spacing: 5) {
+                                    Image(systemName: testSuccess ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                        .foregroundColor(testSuccess ? .green : .orange)
+                                        .font(.system(size: 11))
+                                    Text(msg)
+                                        .font(.system(size: 10.5))
+                                        .foregroundColor(testSuccess ? .green : .orange)
+                                }
+                                .padding(.top, 2)
+                            }
+                        }
+                        .padding(12)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.5)
+                        )
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
+        }
+        .frame(width: 380, height: 490)
+        .background(.ultraThinMaterial)
+        .onAppear {
+            proxyURLInput = client.proxyURL
+            secretKeyInput = client.secretKey
+            pollIntervalInput = client.pollInterval
+        }
+    }
+    
+    private func runTest() {
+        isTesting = true
+        testResult = nil
+        Task {
+            let res = await client.testConnection(url: proxyURLInput, key: secretKeyInput)
+            await MainActor.run {
+                self.isTesting = false
+                self.testSuccess = res.success
+                self.testResult = res.message
+            }
+        }
+    }
+    
+    private func saveAndClose() {
+        client.updateSettings(
+            url: proxyURLInput,
+            key: secretKeyInput,
+            interval: pollIntervalInput
+        )
+        withAnimation(.easeInOut(duration: 0.18)) {
+            isShowing = false
+        }
+    }
+}
+
 // MARK: - Main Popover View (Apple Inset-Grouped Native Style)
 
 struct MainView: View {
     @ObservedObject var client: ProxyClient
     @State private var selectedProvider: String = "ALL"
+    @State private var targetedId: String? = nil
+    @State private var isShowingSettings: Bool = false
     
     var providers: [String] {
         let set = Set(client.accounts.map { $0.provider.uppercased() })
@@ -20,9 +281,13 @@ struct MainView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Header Bar
-            HeaderView(client: client)
+        Group {
+            if isShowingSettings {
+                SettingsView(client: client, isShowing: $isShowingSettings)
+            } else {
+                VStack(spacing: 0) {
+                    // Header Bar
+                    HeaderView(client: client, isShowingSettings: $isShowingSettings)
             
             Divider()
                 .overlay(Color(NSColor.separatorColor).opacity(0.3))
@@ -42,11 +307,32 @@ struct MainView: View {
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 0) {
                         ForEach(Array(filteredAccounts.enumerated()), id: \.element.id) { index, acc in
-                            AccountRowView(account: acc)
+                            AccountRowView(
+                                account: acc,
+                                client: client,
+                                isTargeted: targetedId == acc.id
+                            )
+                            .draggable(acc.id)
+                            .dropDestination(for: String.self) { items, _ in
+                                guard let sourceId = items.first else { return false }
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                    client.reorderAccount(fromId: sourceId, toId: acc.id)
+                                }
+                                targetedId = nil
+                                return true
+                            } isTargeted: { targeted in
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    if targeted {
+                                        targetedId = acc.id
+                                    } else if targetedId == acc.id {
+                                        targetedId = nil
+                                    }
+                                }
+                            }
                             
                             if index < filteredAccounts.count - 1 {
                                 Divider()
-                                    .padding(.leading, 20)
+                                    .padding(.leading, 24)
                                     .overlay(Color(NSColor.separatorColor).opacity(0.2))
                             }
                         }
@@ -70,6 +356,8 @@ struct MainView: View {
         }
         .frame(width: 380, height: 490)
         .background(.ultraThinMaterial)
+            }
+        }
     }
 }
 
@@ -77,6 +365,7 @@ struct MainView: View {
 
 struct HeaderView: View {
     @ObservedObject var client: ProxyClient
+    @Binding var isShowingSettings: Bool
     
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
@@ -128,6 +417,26 @@ struct HeaderView: View {
             
             // Native Action Menu
             Menu {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        isShowingSettings = true
+                    }
+                }) {
+                    Label("Preferences…", systemImage: "gearshape")
+                }
+                .keyboardShortcut(",", modifiers: .command)
+                
+                Divider()
+                if !client.pinnedAccountIds.isEmpty {
+                    Button(action: {
+                        client.clearAllPins()
+                    }) {
+                        Label("Reset Menu Bar (Clear \(client.pinnedAccountIds.count) Pins)", systemImage: "pin.slash")
+                    }
+                    
+                    Divider()
+                }
+                
                 Button(action: { client.runRebalance() }) {
                     Label(client.isRebalancing ? "Rebalancing…" : "Rebalance Priorities (Soonest Reset)", systemImage: "bolt.fill")
                 }
@@ -142,7 +451,8 @@ struct HeaderView: View {
                 Divider()
                 
                 Button(action: {
-                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: NSString(string: "~/.cli-proxy-api").expandingTildeInPath)
+                    let configPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cli-proxy-api").path
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: configPath)
                 }) {
                     Label("Reveal Config in Finder", systemImage: "folder")
                 }
@@ -155,15 +465,17 @@ struct HeaderView: View {
                     Label("Quit CLIProxyBar", systemImage: "power")
                 }
             } label: {
-                Text("•••")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11.5, weight: .medium))
                     .foregroundColor(.secondary)
-                    .frame(width: 28, height: 20)
+                    .frame(width: 24, height: 20)
                     .background(Color(NSColor.separatorColor).opacity(0.15))
-                    .cornerRadius(4)
+                    .cornerRadius(5)
             }
             .menuStyle(.borderlessButton)
-            .frame(width: 28)
+            .menuIndicator(.hidden)
+            .frame(width: 24)
+            .help("Settings & Actions")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -278,6 +590,35 @@ struct MaskedEmailView: View {
     }
 }
 
+// MARK: - Official Brand Vector Logo View
+
+struct ProviderLogoView: View {
+    let provider: String
+    
+    var image: NSImage? {
+        loadProviderLogo(provider: provider)
+    }
+    
+    var body: some View {
+        Group {
+            if let nsImg = image {
+                Image(nsImage: nsImg)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 14, height: 14)
+            } else {
+                Text(provider.prefix(2).uppercased())
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(width: 22, height: 18)
+        .background(Color(NSColor.separatorColor).opacity(0.15))
+        .cornerRadius(3.5)
+        .help(provider.capitalized)
+    }
+}
+
 // MARK: - Clean Model Name Helper
 
 func formatLockedModels(_ rawModels: [String]) -> String {
@@ -297,20 +638,35 @@ func formatLockedModels(_ rawModels: [String]) -> String {
         if name.starts(with: "gpt-") {
             name = String(name.dropFirst("gpt-".count))
         }
+        if let dashIdx = name.firstIndex(of: "-") {
+            let prefix = name[..<dashIdx]
+            if Double(prefix) != nil {
+                name = String(name[name.index(after: dashIdx)...])
+            }
+        }
         return name
     }
     return cleaned.joined(separator: ", ")
 }
 
-// MARK: - Account Row View (Clean Inset Row with Aligned Columns)
+// MARK: - Account Row View (Clean Inset Row with Aligned Columns & Drag Affordance)
 
 struct AccountRowView: View {
     let account: NormalizedAccount
+    @ObservedObject var client: ProxyClient
+    var isTargeted: Bool = false
+    @State private var isHovered: Bool = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Line 1: Status Dot + Masked Email + [Fixed-Width Column Grid]
+            // Line 1: Drag Handle + Status Dot + Masked Email + [Fixed-Width Column Grid]
             HStack(alignment: .center, spacing: 6) {
+                // Subtle drag affordance
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 8.5, weight: .regular))
+                    .foregroundColor(isHovered ? .secondary : .secondary.opacity(0.25))
+                    .frame(width: 10)
+                
                 Circle()
                     .fill(statusColor(account.status))
                     .frame(width: 5, height: 5)
@@ -320,19 +676,27 @@ struct AccountRowView: View {
                 
                 Spacer()
                 
-                // Column 2: Provider Tag (Fixed width 62px, centered)
-                Text(account.provider.uppercased())
-                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .frame(width: 62, alignment: .center)
-                    .padding(.vertical, 1)
-                    .background(Color(NSColor.separatorColor).opacity(0.18))
-                    .cornerRadius(2.5)
+                // Pin button for Menu Bar Glance
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        client.togglePinAccount(id: account.id)
+                    }
+                }) {
+                    Image(systemName: client.pinnedAccountIds.contains(account.id) ? "pin.fill" : "pin")
+                        .font(.system(size: 9))
+                        .foregroundColor(client.pinnedAccountIds.contains(account.id) ? Color(NSColor.controlAccentColor) : (isHovered ? .secondary : .secondary.opacity(0.2)))
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
+                .help(client.pinnedAccountIds.contains(account.id) ? "Bỏ ghim khỏi Menu Bar (Đang ghim)" : "Ghim tài khoản này lên Menu Bar")
+                
+                // Column 2: Official Real Brand Logo (Fixed width 22px)
+                ProviderLogoView(provider: account.provider)
                 
                 // Column 3: Priority (Fixed width 26px, right-aligned)
                 Text("P\(account.priority)")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(isTargeted ? Color(NSColor.controlAccentColor) : .secondary)
                     .frame(width: 26, alignment: .trailing)
                 
                 // Column 4: Countdown or Status (Fixed width 56px, right-aligned)
@@ -395,6 +759,19 @@ struct AccountRowView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isTargeted ? Color(NSColor.controlAccentColor).opacity(0.15) : (isHovered ? Color(NSColor.separatorColor).opacity(0.08) : Color.clear))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(isTargeted ? Color(NSColor.controlAccentColor).opacity(0.6) : Color.clear, lineWidth: 1.5)
+        )
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .help("Drag to reorder priority")
     }
     
     private func statusColor(_ st: AccountStatus) -> Color {
@@ -415,8 +792,8 @@ struct MiniProgressBar: View {
     let resetSeconds: Int?
     
     var tintColor: Color {
-        if percent >= 95 { return Color(NSColor.systemRed) }
-        if percent >= 75 { return Color(NSColor.systemOrange) }
+        if percent <= 5 { return Color(NSColor.systemRed) }
+        if percent <= 25 { return Color(NSColor.systemOrange) }
         return Color(NSColor.systemGreen)
     }
     

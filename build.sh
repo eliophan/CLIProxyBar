@@ -50,4 +50,10 @@ swiftc -parse-as-library -O \
     -o "$MACOS_DIR/CLIProxyBar"
 
 chmod +x "$MACOS_DIR/CLIProxyBar"
+
+if [ -d "$DIR/Resources" ]; then
+    echo "==> Copying asset resources..."
+    cp -R "$DIR/Resources/"* "$RESOURCES_DIR/"
+fi
+
 echo "==> Build completed successfully: $APP_DIR"

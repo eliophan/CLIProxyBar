@@ -1,5 +1,43 @@
 import Foundation
 import SwiftUI
+import AppKit
+import Security
+
+// MARK: - Secure Keychain Storage
+
+enum KeychainHelper {
+    private static let serviceName = "com.cliproxy.bar"
+    
+    static func save(key: String, value: String) {
+        guard let data = value.data(using: .utf8) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecAttrAccount as String: key
+        ]
+        SecItemDelete(query as CFDictionary)
+        
+        var newQuery = query
+        newQuery[kSecValueData as String] = data
+        SecItemAdd(newQuery as CFDictionary, nil)
+    }
+    
+    static func load(key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        if status == errSecSuccess, let data = item as? Data {
+            return String(data: data, encoding: .utf8)
+        }
+        return nil
+    }
+}
 
 // MARK: - Raw JSON API Structures
 
@@ -149,4 +187,87 @@ func formatSeconds(_ totalSeconds: Int) -> String {
         return "\(minutes)m \(seconds)s"
     }
     return "\(seconds)s"
+}
+
+// MARK: - Menu Bar Provider Group
+
+struct ProviderGlanceGroup: Identifiable {
+    let provider: String
+    let accounts: [NormalizedAccount]
+    var id: String { provider }
+    
+    var displayText: String {
+        accounts.map { acc -> String in
+            if acc.status == .cooldown && acc.cooldownRemainingSeconds > 0 {
+                return formatSeconds(acc.cooldownRemainingSeconds)
+            } else if let pct = acc.primaryUsedPercent {
+                return "\(Int(pct))%"
+            } else {
+                return acc.status == .ready ? "Ready" : acc.status.rawValue
+            }
+        }.joined(separator: " • ")
+    }
+}
+
+// MARK: - Universal Provider Brand Resolution & Logo Loader
+
+func resolveProviderLogoName(_ raw: String) -> String {
+    let lower = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+    if lower.contains("claude") || lower.contains("anthropic") {
+        return "claude"
+    } else if lower.contains("codex") || lower.contains("openai") || lower.contains("chatgpt") {
+        return "codex"
+    } else if lower.contains("antigravity") {
+        return "antigravity"
+    } else if lower.contains("meta") || lower.contains("llama") {
+        return "meta"
+    } else if lower.contains("devin") || lower.contains("cognition") {
+        return "devin"
+    } else if lower.contains("kimi") || lower.contains("moonshot") {
+        return "kimi"
+    } else if lower.contains("vertex") {
+        return "vertex"
+    } else if lower.contains("gemini") || lower.contains("google") || lower.contains("aistudio") {
+        return "gemini"
+    } else if lower.contains("xai") || lower.contains("grok") {
+        return "xai"
+    } else if lower.contains("qwen") || lower.contains("qianwen") || lower.contains("alibaba") {
+        return "qwen"
+    }
+    return lower
+}
+
+func loadProviderLogo(provider: String) -> NSImage? {
+    let resolved = resolveProviderLogoName(provider)
+    let raw = provider.lowercased()
+    
+    // 1. Standard App Bundle resources
+    if let url = Bundle.main.url(forResource: resolved, withExtension: "svg"),
+       let img = NSImage(contentsOf: url) {
+        return img
+    }
+    if let url = Bundle.main.url(forResource: raw, withExtension: "svg"),
+       let img = NSImage(contentsOf: url) {
+        return img
+    }
+    
+    // 2. Relative to main bundle URL (e.g. Contents/Resources)
+    let bundleResources = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources")
+    if let img = NSImage(contentsOf: bundleResources.appendingPathComponent("\(resolved).svg")) {
+        return img
+    }
+    if let img = NSImage(contentsOf: bundleResources.appendingPathComponent("\(raw).svg")) {
+        return img
+    }
+    
+    // 3. Relative to current working directory (e.g. during local development)
+    let currentDirResources = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Resources")
+    if let img = NSImage(contentsOf: currentDirResources.appendingPathComponent("\(resolved).svg")) {
+        return img
+    }
+    if let img = NSImage(contentsOf: currentDirResources.appendingPathComponent("\(raw).svg")) {
+        return img
+    }
+    
+    return nil
 }
