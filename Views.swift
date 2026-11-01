@@ -27,7 +27,7 @@ struct MainView: View {
             Divider()
                 .overlay(Color(NSColor.separatorColor).opacity(0.3))
             
-            // Filter Pills Bar (Native horizontal capsule pills)
+            // Filter Pills Bar (Subtle Apple Capsule style)
             if providers.count > 2 {
                 FilterPillsView(providers: providers, selected: $selectedProvider, accounts: client.accounts)
                 
@@ -39,14 +39,14 @@ struct MainView: View {
             if client.accounts.isEmpty {
                 EmptyStateView(client: client)
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 0) {
                         ForEach(Array(filteredAccounts.enumerated()), id: \.element.id) { index, acc in
                             AccountRowView(account: acc)
                             
                             if index < filteredAccounts.count - 1 {
                                 Divider()
-                                    .padding(.leading, 24)
+                                    .padding(.leading, 20)
                                     .overlay(Color(NSColor.separatorColor).opacity(0.2))
                             }
                         }
@@ -68,7 +68,7 @@ struct MainView: View {
             // Footer Bar
             FooterView(client: client)
         }
-        .frame(width: 370, height: 480)
+        .frame(width: 380, height: 490)
         .background(.ultraThinMaterial)
     }
 }
@@ -170,7 +170,7 @@ struct HeaderView: View {
     }
 }
 
-// MARK: - Filter Pills (Horizontal Apple Capsule Style)
+// MARK: - Filter Pills (Apple Subtle Frosted Capsule Style)
 
 struct FilterPillsView: View {
     let providers: [String]
@@ -186,14 +186,20 @@ struct FilterPillsView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 4) {
                 ForEach(providers, id: \.self) { p in
-                    Button(action: { selected = p }) {
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selected = p
+                        }
+                    }) {
                         Text("\(p.capitalized) (\(countFor(prov: p)))")
                             .font(.system(size: 10, weight: selected == p ? .semibold : .regular))
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(selected == p ? Color(NSColor.controlAccentColor).opacity(0.18) : Color.clear)
-                            .foregroundColor(selected == p ? Color(NSColor.controlAccentColor) : .secondary)
-                            .cornerRadius(4)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3.5)
+                            .background(
+                                Capsule()
+                                    .fill(selected == p ? Color.primary.opacity(0.12) : Color.clear)
+                            )
+                            .foregroundColor(selected == p ? .primary : .secondary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -204,7 +210,7 @@ struct FilterPillsView: View {
     }
 }
 
-// MARK: - Masked Email View (Middle blurred, click to reveal full email)
+// MARK: - Masked Email View (Deep Privacy with Seamless Frosted Blur)
 
 struct MaskedEmailView: View {
     let email: String
@@ -257,7 +263,7 @@ struct MaskedEmailView: View {
                     if !p.middle.isEmpty {
                         Text(p.middle)
                             .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundColor(.secondary.opacity(0.8))
+                            .foregroundColor(.secondary.opacity(0.85))
                             .blur(radius: 3.5)
                     }
                     
@@ -272,48 +278,79 @@ struct MaskedEmailView: View {
     }
 }
 
-// MARK: - Account Row View (Clean Inset Row)
+// MARK: - Clean Model Name Helper
+
+func formatLockedModels(_ rawModels: [String]) -> String {
+    let cleaned = rawModels.map { m -> String in
+        var name = m
+        // Claude cleaning
+        if name.starts(with: "claude-") {
+            name = String(name.dropFirst("claude-".count))
+        }
+        if name.hasSuffix("-5-5") {
+            name = String(name.dropLast("-5-5".count))
+        }
+        if name.hasSuffix("-high") {
+            name = String(name.dropLast("-high".count))
+        }
+        // Codex / GPT cleaning
+        if name.starts(with: "gpt-") {
+            name = String(name.dropFirst("gpt-".count))
+        }
+        return name
+    }
+    return cleaned.joined(separator: ", ")
+}
+
+// MARK: - Account Row View (Clean Inset Row with Aligned Columns)
 
 struct AccountRowView: View {
     let account: NormalizedAccount
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Line 1: Status Dot + Masked Email + Provider + Priority + Countdown
+            // Line 1: Status Dot + Masked Email + [Fixed-Width Column Grid]
             HStack(alignment: .center, spacing: 6) {
                 Circle()
                     .fill(statusColor(account.status))
                     .frame(width: 5, height: 5)
                 
-                // Masked Email with Click to Reveal
+                // Masked Email expands naturally
                 MaskedEmailView(email: account.displayName)
                 
                 Spacer()
                 
+                // Column 2: Provider Tag (Fixed width 62px, centered)
                 Text(account.provider.uppercased())
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
                     .foregroundColor(.secondary)
-                    .padding(.horizontal, 3)
+                    .frame(width: 62, alignment: .center)
                     .padding(.vertical, 1)
-                    .background(Color(NSColor.separatorColor).opacity(0.2))
-                    .cornerRadius(2)
+                    .background(Color(NSColor.separatorColor).opacity(0.18))
+                    .cornerRadius(2.5)
                 
+                // Column 3: Priority (Fixed width 26px, right-aligned)
                 Text("P\(account.priority)")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundColor(.secondary)
+                    .frame(width: 26, alignment: .trailing)
                 
-                if account.status == .cooldown && account.cooldownRemainingSeconds > 0 {
-                    Text(formatSeconds(account.cooldownRemainingSeconds))
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(Color(NSColor.systemOrange))
-                } else {
-                    Text(account.status.rawValue)
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(account.status == .ready ? Color(NSColor.systemGreen) : .secondary)
+                // Column 4: Countdown or Status (Fixed width 56px, right-aligned)
+                Group {
+                    if account.status == .cooldown && account.cooldownRemainingSeconds > 0 {
+                        Text(formatSeconds(account.cooldownRemainingSeconds))
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(Color(NSColor.systemOrange))
+                    } else {
+                        Text(account.status.rawValue)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundColor(account.status == .ready ? Color(NSColor.systemGreen) : .secondary)
+                    }
                 }
+                .frame(width: 56, alignment: .trailing)
             }
             
-            // Line 2: 5-Hour Limit Bar (if available)
+            // Line 2: 5-Hour Limit Bar (Equal track length)
             if let primary = account.primaryUsedPercent {
                 MiniProgressBar(
                     label: "5h",
@@ -322,7 +359,7 @@ struct AccountRowView: View {
                 )
             }
             
-            // Line 3: 7-Day Limit Bar (if available)
+            // Line 3: 7-Day Limit Bar (Equal track length)
             if let secondary = account.secondaryUsedPercent {
                 MiniProgressBar(
                     label: "7d",
@@ -341,14 +378,14 @@ struct AccountRowView: View {
                 .padding(.top, 1)
             }
             
-            // Line 5: Locked Models (if in cooldown)
+            // Line 5: Locked Models (Refined and concise)
             if !account.coolingModels.isEmpty {
-                HStack(spacing: 3) {
+                HStack(spacing: 4) {
                     Text("Locked:")
                         .font(.system(size: 8.5, weight: .medium))
-                        .foregroundColor(Color(NSColor.systemOrange).opacity(0.8))
+                        .foregroundColor(Color(NSColor.systemOrange).opacity(0.85))
                     
-                    Text(account.coolingModels.joined(separator: ", "))
+                    Text(formatLockedModels(account.coolingModels))
                         .font(.system(size: 8.5, design: .monospaced))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
@@ -370,7 +407,7 @@ struct AccountRowView: View {
     }
 }
 
-// MARK: - Mini Progress Bar (Sleek Apple Track)
+// MARK: - Mini Progress Bar (Equal-Length Track with Fixed Metrics Width)
 
 struct MiniProgressBar: View {
     let label: String
@@ -384,13 +421,14 @@ struct MiniProgressBar: View {
     }
     
     var body: some View {
-        HStack(alignment: .center, spacing: 5) {
+        HStack(alignment: .center, spacing: 6) {
+            // Fixed-width label
             Text(label)
                 .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundColor(.secondary)
-                .frame(width: 14, alignment: .leading)
+                .frame(width: 16, alignment: .leading)
             
-            // Progress Bar Track
+            // Progress Bar Track (Fills remaining space equally across all rows)
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
@@ -404,7 +442,8 @@ struct MiniProgressBar: View {
             }
             .frame(height: 2.5)
             
-            HStack(spacing: 2) {
+            // Fixed-width Right Metrics (Guarantees every track has the EXACT same width)
+            HStack(spacing: 3) {
                 Text("\(Int(percent))%")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundColor(tintColor)
@@ -415,7 +454,7 @@ struct MiniProgressBar: View {
                         .foregroundColor(.secondary)
                 }
             }
-            .frame(minWidth: 80, alignment: .trailing)
+            .frame(width: 95, alignment: .trailing)
         }
     }
 }
