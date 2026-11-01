@@ -1,0 +1,4 @@
+# Build output
+*.app
+test_bin
+.DS_Store
