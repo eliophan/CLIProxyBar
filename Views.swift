@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-// MARK: - Main Popover View (Apple macOS HIG + Agent Design)
+// MARK: - Main Popover View (Apple Inset-Grouped Native Style)
 
 struct MainView: View {
     @ObservedObject var client: ProxyClient
@@ -25,57 +25,55 @@ struct MainView: View {
             HeaderView(client: client)
             
             Divider()
-                .overlay(Color(NSColor.separatorColor).opacity(0.4))
+                .overlay(Color(NSColor.separatorColor).opacity(0.3))
             
-            // Native Segmented Control for Providers
+            // Filter Pills Bar (Native horizontal capsule pills)
             if providers.count > 2 {
-                Picker("Provider", selection: $selectedProvider) {
-                    ForEach(providers, id: \.self) { p in
-                        Text(providerTabTitle(p)).tag(p)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .controlSize(.small)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                FilterPillsView(providers: providers, selected: $selectedProvider, accounts: client.accounts)
                 
                 Divider()
-                    .overlay(Color(NSColor.separatorColor).opacity(0.3))
+                    .overlay(Color(NSColor.separatorColor).opacity(0.2))
             }
             
-            // Content List
+            // Account List in Inset-Grouped Container
             if client.accounts.isEmpty {
                 EmptyStateView(client: client)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(filteredAccounts) { acc in
-                            AccountCardView(account: acc)
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(filteredAccounts.enumerated()), id: \.element.id) { index, acc in
+                            AccountRowView(account: acc)
+                            
+                            if index < filteredAccounts.count - 1 {
+                                Divider()
+                                    .padding(.leading, 24)
+                                    .overlay(Color(NSColor.separatorColor).opacity(0.2))
+                            }
                         }
                     }
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.35))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(NSColor.separatorColor).opacity(0.3), lineWidth: 0.5)
+                    )
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                 }
             }
             
             Divider()
-                .overlay(Color(NSColor.separatorColor).opacity(0.4))
+                .overlay(Color(NSColor.separatorColor).opacity(0.3))
             
             // Footer Bar
             FooterView(client: client)
         }
-        .frame(width: 360, height: 490)
+        .frame(width: 370, height: 480)
         .background(.ultraThinMaterial)
-    }
-    
-    private func providerTabTitle(_ p: String) -> String {
-        if p == "ALL" { return "All (\(client.accounts.count))" }
-        let c = client.accounts.filter { $0.provider.uppercased() == p }.count
-        return "\(p.capitalized) (\(c))"
     }
 }
 
-// MARK: - Header Bar (Clean, Typography-First)
+// MARK: - Header Bar (Clean, Rebalance moved into ••• Menu)
 
 struct HeaderView: View {
     @ObservedObject var client: ProxyClient
@@ -85,11 +83,11 @@ struct HeaderView: View {
             // Status Dot
             Circle()
                 .fill(client.isConnected ? Color(NSColor.systemGreen) : Color(NSColor.systemRed))
-                .frame(width: 6, height: 6)
+                .frame(width: 7, height: 7)
             
-            // Title & Metrics
+            // Title & Status
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Text("CLIProxy")
                         .font(.system(size: 13, weight: .semibold))
                     
@@ -98,7 +96,7 @@ struct HeaderView: View {
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
-                        .background(Color(NSColor.separatorColor).opacity(0.25))
+                        .background(Color(NSColor.separatorColor).opacity(0.2))
                         .cornerRadius(3)
                 }
                 
@@ -128,56 +126,97 @@ struct HeaderView: View {
             
             Spacer()
             
-            // Actions (Clean Apple-Style Buttons)
-            HStack(spacing: 5) {
+            // Native Action Menu (Rebalance is neatly inside here)
+            Menu {
                 Button(action: { client.runRebalance() }) {
-                    Text(client.isRebalancing ? "Rebalancing…" : "Rebalance")
-                        .font(.system(size: 11, weight: .medium))
+                    Label(client.isRebalancing ? "Rebalancing…" : "Rebalance Priorities (Soonest Reset)", systemImage: "bolt.fill")
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
                 .disabled(client.isRebalancing)
-                .help("Run Soonest-Reset Priority Rebalancer")
                 
-                Menu {
-                    Button("Refresh Quota") {
-                        Task { await client.fetchAuthFiles() }
-                    }
-                    Button("Open Config Directory") {
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: NSString(string: "~/.cli-proxy-api").expandingTildeInPath)
-                    }
-                    Divider()
-                    Button("Quit CLIProxyBar") {
-                        NSApplication.shared.terminate(nil)
-                    }
-                } label: {
-                    Text("•••")
-                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                Button(action: {
+                    Task { await client.fetchAuthFiles() }
+                }) {
+                    Label("Refresh Quota", systemImage: "arrow.clockwise")
                 }
-                .menuStyle(.borderlessButton)
-                .frame(width: 24)
+                
+                Divider()
+                
+                Button(action: {
+                    NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: NSString(string: "~/.cli-proxy-api").expandingTildeInPath)
+                }) {
+                    Label("Reveal Config in Finder", systemImage: "folder")
+                }
+                
+                Divider()
+                
+                Button(action: {
+                    NSApplication.shared.terminate(nil)
+                }) {
+                    Label("Quit CLIProxyBar", systemImage: "power")
+                }
+            } label: {
+                Text("•••")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .frame(width: 28, height: 20)
+                    .background(Color(NSColor.separatorColor).opacity(0.15))
+                    .cornerRadius(4)
             }
+            .menuStyle(.borderlessButton)
+            .frame(width: 28)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 }
 
-// MARK: - Account Card View (Zero-Shadow, Layering, Apple HIG)
+// MARK: - Filter Pills (Horizontal Apple Capsule Style)
 
-struct AccountCardView: View {
+struct FilterPillsView: View {
+    let providers: [String]
+    @Binding var selected: String
+    let accounts: [NormalizedAccount]
+    
+    func countFor(prov: String) -> Int {
+        if prov == "ALL" { return accounts.count }
+        return accounts.filter { $0.provider.uppercased() == prov }.count
+    }
+    
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(providers, id: \.self) { p in
+                    Button(action: { selected = p }) {
+                        Text("\(p.capitalized) (\(countFor(prov: p)))")
+                            .font(.system(size: 10, weight: selected == p ? .semibold : .regular))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(selected == p ? Color(NSColor.controlAccentColor).opacity(0.18) : Color.clear)
+                            .foregroundColor(selected == p ? Color(NSColor.controlAccentColor) : .secondary)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+        }
+    }
+}
+
+// MARK: - Account Row View (Clean Inset Row)
+
+struct AccountRowView: View {
     let account: NormalizedAccount
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            // Row 1: Header (Email + Provider Tag + Priority + Status Dot)
+        VStack(alignment: .leading, spacing: 4) {
+            // Line 1: Status Dot + Email + Provider + Priority + Countdown
             HStack(alignment: .center, spacing: 6) {
-                // Status Indicator Dot
                 Circle()
                     .fill(statusColor(account.status))
                     .frame(width: 5, height: 5)
                 
-                // Account Email
                 Text(account.displayName)
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(account.isDisabled ? .secondary : .primary)
@@ -186,51 +225,56 @@ struct AccountCardView: View {
                 
                 Spacer()
                 
-                // Provider Tag
                 Text(account.provider.uppercased())
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundColor(.secondary)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, 3)
                     .padding(.vertical, 1)
                     .background(Color(NSColor.separatorColor).opacity(0.2))
-                    .cornerRadius(3)
+                    .cornerRadius(2)
                 
-                // Priority Tag
                 Text("P\(account.priority)")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
                     .foregroundColor(.secondary)
                 
-                // Status Text / Countdown
-                StatusText(status: account.status, remainingSeconds: account.cooldownRemainingSeconds)
+                if account.status == .cooldown && account.cooldownRemainingSeconds > 0 {
+                    Text(formatSeconds(account.cooldownRemainingSeconds))
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(Color(NSColor.systemOrange))
+                } else {
+                    Text(account.status.rawValue)
+                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .foregroundColor(account.status == .ready ? Color(NSColor.systemGreen) : .secondary)
+                }
             }
             
-            // Row 2: 5-Hour Limit Row
+            // Line 2: 5-Hour Limit Bar
             if let primary = account.primaryUsedPercent {
-                MetricRow(
-                    label: "5h Limit",
+                MiniProgressBar(
+                    label: "5h",
                     percent: primary,
                     resetSeconds: account.primaryResetSeconds
                 )
             }
             
-            // Row 3: 7-Day Limit Row
+            // Line 3: 7-Day Limit Bar
             if let secondary = account.secondaryUsedPercent {
-                MetricRow(
-                    label: "7d Limit",
+                MiniProgressBar(
+                    label: "7d",
                     percent: secondary,
                     resetSeconds: account.secondaryResetSeconds
                 )
             }
             
-            // Row 4: Locked Models (if in cooldown)
+            // Line 4: Locked Models (if in cooldown)
             if !account.coolingModels.isEmpty {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     Text("Locked:")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundColor(Color(NSColor.systemOrange))
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundColor(Color(NSColor.systemOrange).opacity(0.8))
                     
                     Text(account.coolingModels.joined(separator: ", "))
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(.system(size: 8.5, design: .monospaced))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                 }
@@ -238,13 +282,7 @@ struct AccountCardView: View {
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.45))
-        .cornerRadius(6)
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Color(NSColor.separatorColor).opacity(0.35), lineWidth: 0.5)
-        )
+        .padding(.vertical, 6)
     }
     
     private func statusColor(_ st: AccountStatus) -> Color {
@@ -257,9 +295,9 @@ struct AccountCardView: View {
     }
 }
 
-// MARK: - Metric Row & Progress Bar
+// MARK: - Mini Progress Bar (Sleek Apple Track)
 
-struct MetricRow: View {
+struct MiniProgressBar: View {
     let label: String
     let percent: Double
     let resetSeconds: Int?
@@ -271,32 +309,17 @@ struct MetricRow: View {
     }
     
     var body: some View {
-        VStack(spacing: 2) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(label)
-                    .font(.system(size: 9, weight: .regular))
-                    .foregroundColor(.secondary)
-                
-                Spacer()
-                
-                HStack(spacing: 3) {
-                    Text("\(Int(percent))%")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundColor(tintColor)
-                    
-                    if let sec = resetSeconds, sec > 0 {
-                        Text("(\(formatSeconds(sec)))")
-                            .font(.system(size: 9, weight: .regular, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
+        HStack(alignment: .center, spacing: 5) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 14, alignment: .leading)
             
-            // Progress Track (Thin, 2.5px, Apple Style)
+            // Progress Bar Track
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color(NSColor.separatorColor).opacity(0.25))
+                        .fill(Color(NSColor.separatorColor).opacity(0.2))
                         .frame(height: 2.5)
                     
                     Capsule()
@@ -305,30 +328,24 @@ struct MetricRow: View {
                 }
             }
             .frame(height: 2.5)
+            
+            HStack(spacing: 2) {
+                Text("\(Int(percent))%")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(tintColor)
+                
+                if let sec = resetSeconds, sec > 0 {
+                    Text("(\(formatSeconds(sec)))")
+                        .font(.system(size: 8.5, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .frame(minWidth: 80, alignment: .trailing)
         }
     }
 }
 
-// MARK: - Status Text (Typography-First, No Bloated Icons)
-
-struct StatusText: View {
-    let status: AccountStatus
-    let remainingSeconds: Int
-    
-    var body: some View {
-        if status == .cooldown && remainingSeconds > 0 {
-            Text(formatSeconds(remainingSeconds))
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundColor(Color(NSColor.systemOrange))
-        } else {
-            Text(status.rawValue)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundColor(status == .ready ? Color(NSColor.systemGreen) : .secondary)
-        }
-    }
-}
-
-// MARK: - Empty State View (Decisive, 1-Line, No Illustration)
+// MARK: - Empty State View
 
 struct EmptyStateView: View {
     @ObservedObject var client: ProxyClient
@@ -343,19 +360,18 @@ struct EmptyStateView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(.secondary)
             
-            Button("Retry") {
+            Button("Retry Connection") {
                 Task { await client.fetchAuthFiles() }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .padding(.top, 4)
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-// MARK: - Footer View (Subtle, Clean Metadata)
+// MARK: - Footer View
 
 struct FooterView: View {
     @ObservedObject var client: ProxyClient
@@ -370,13 +386,13 @@ struct FooterView: View {
     var body: some View {
         HStack {
             Text("Updated \(timeString)")
-                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.secondary)
             
             Spacer()
             
             Text("\(client.totalCount) accounts loaded")
-                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(.secondary)
         }
         .padding(.horizontal, 12)
