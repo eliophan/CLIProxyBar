@@ -73,7 +73,7 @@ struct MainView: View {
     }
 }
 
-// MARK: - Header Bar (Clean, Rebalance moved into ••• Menu)
+// MARK: - Header Bar (Clean, Rebalance inside ••• Menu)
 
 struct HeaderView: View {
     @ObservedObject var client: ProxyClient
@@ -126,7 +126,7 @@ struct HeaderView: View {
             
             Spacer()
             
-            // Native Action Menu (Rebalance is neatly inside here)
+            // Native Action Menu
             Menu {
                 Button(action: { client.runRebalance() }) {
                     Label(client.isRebalancing ? "Rebalancing…" : "Rebalance Priorities (Soonest Reset)", systemImage: "bolt.fill")
@@ -204,6 +204,75 @@ struct FilterPillsView: View {
     }
 }
 
+// MARK: - Masked Email View (Middle blurred, click to reveal full email)
+
+struct MaskedEmailView: View {
+    let email: String
+    @State private var isRevealed: Bool = false
+    
+    private var parts: (prefix: String, middle: String, suffix: String) {
+        if let atIndex = email.firstIndex(of: "@") {
+            let user = String(email[..<atIndex])
+            let domain = String(email[atIndex...])
+            if user.count > 4 {
+                let pre = String(user.prefix(3))
+                let suf = String(user.suffix(2)) + domain
+                let mid = String(user.dropFirst(3).dropLast(2))
+                return (pre, mid, suf)
+            } else if user.count > 2 {
+                let pre = String(user.prefix(1))
+                let suf = domain
+                let mid = String(user.dropFirst(1))
+                return (pre, mid, suf)
+            } else {
+                return (user, "", domain)
+            }
+        } else {
+            if email.count > 6 {
+                let pre = String(email.prefix(2))
+                let suf = String(email.suffix(2))
+                let mid = String(email.dropFirst(2).dropLast(2))
+                return (pre, mid, suf)
+            }
+            return (email, "", "")
+        }
+    }
+    
+    var body: some View {
+        Button(action: {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                isRevealed.toggle()
+            }
+        }) {
+            HStack(spacing: 0) {
+                if isRevealed {
+                    Text(email)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.primary)
+                } else {
+                    let p = parts
+                    Text(p.prefix)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.primary)
+                    
+                    if !p.middle.isEmpty {
+                        Text(p.middle)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.secondary.opacity(0.8))
+                            .blur(radius: 3.5)
+                    }
+                    
+                    Text(p.suffix)
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.primary)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .help(isRevealed ? "Click to blur email" : "Click to reveal full email")
+    }
+}
+
 // MARK: - Account Row View (Clean Inset Row)
 
 struct AccountRowView: View {
@@ -211,17 +280,14 @@ struct AccountRowView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Line 1: Status Dot + Email + Provider + Priority + Countdown
+            // Line 1: Status Dot + Masked Email + Provider + Priority + Countdown
             HStack(alignment: .center, spacing: 6) {
                 Circle()
                     .fill(statusColor(account.status))
                     .frame(width: 5, height: 5)
                 
-                Text(account.displayName)
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundColor(account.isDisabled ? .secondary : .primary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                // Masked Email with Click to Reveal
+                MaskedEmailView(email: account.displayName)
                 
                 Spacer()
                 
@@ -248,7 +314,7 @@ struct AccountRowView: View {
                 }
             }
             
-            // Line 2: 5-Hour Limit Bar
+            // Line 2: 5-Hour Limit Bar (if available)
             if let primary = account.primaryUsedPercent {
                 MiniProgressBar(
                     label: "5h",
@@ -257,7 +323,7 @@ struct AccountRowView: View {
                 )
             }
             
-            // Line 3: 7-Day Limit Bar
+            // Line 3: 7-Day Limit Bar (if available)
             if let secondary = account.secondaryUsedPercent {
                 MiniProgressBar(
                     label: "7d",
@@ -266,7 +332,17 @@ struct AccountRowView: View {
                 )
             }
             
-            // Line 4: Locked Models (if in cooldown)
+            // Line 4: Metadata for providers without % signals (Antigravity & Meta)
+            if account.primaryUsedPercent == nil, let details = account.planDetails {
+                HStack(spacing: 4) {
+                    Text(details)
+                        .font(.system(size: 9, weight: .regular, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.top, 1)
+            }
+            
+            // Line 5: Locked Models (if in cooldown)
             if !account.coolingModels.isEmpty {
                 HStack(spacing: 3) {
                     Text("Locked:")

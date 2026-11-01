@@ -104,6 +104,7 @@ class ProxyClient: ObservableObject {
                 secondaryUsedPercent: acc.secondaryUsedPercent,
                 secondaryResetSeconds: updatedSecReset,
                 planType: acc.planType,
+                planDetails: acc.planDetails,
                 rawObservedAt: acc.rawObservedAt
             )
         }
@@ -181,6 +182,7 @@ class ProxyClient: ObservableObject {
             var secondaryPercent: Double? = nil
             var secondaryResetSec: Int? = nil
             var planType: String? = nil
+            var planDetails: String? = nil
             
             if let signals = f.quota?.signals {
                 // Claude
@@ -225,6 +227,26 @@ class ProxyClient: ObservableObject {
                 }
             }
             
+            // Extract local metadata for providers without usage signals (Antigravity & Meta)
+            if primaryPercent == nil && !path.isEmpty && FileManager.default.fileExists(atPath: path) {
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    if prov == "antigravity" {
+                        let proj = json["project_id"] as? String ?? "aicode-consumers"
+                        var modelCount = 0
+                        if let hints = json["antigravity_capability_hints"] as? [String: Any],
+                           let models = hints["model_ids"] as? [String] {
+                            modelCount = models.count
+                        }
+                        planDetails = "Project: \(proj) • \(modelCount > 0 ? "\(modelCount) models" : "Active")"
+                    } else if prov == "meta" {
+                        let tier = json["subs_tier_name"] as? String ?? "Everyday Usage"
+                        let active = json["is_subs_active"] as? Bool ?? true
+                        planDetails = "Tier: \(tier)\(active ? " • Active" : "")"
+                    }
+                }
+            }
+            
             let status: AccountStatus
             if disabled {
                 status = .disabled
@@ -257,15 +279,12 @@ class ProxyClient: ObservableObject {
                 secondaryUsedPercent: secondaryPercent,
                 secondaryResetSeconds: secondaryResetSec,
                 planType: planType,
+                planDetails: planDetails,
                 rawObservedAt: f.quota?.observedAt
             )
             parsed.append(acc)
         }
         
-        // Sort accounts:
-        // 1. Provider order: Claude, Codex, Antigravity, Others
-        // 2. Status: Ready first, then Cooldown by remaining ascending
-        // 3. Priority descending
         parsed.sort { a, b in
             if a.provider != b.provider {
                 return a.provider < b.provider

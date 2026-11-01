@@ -121,21 +121,12 @@ struct NormalizedAccount: Identifiable {
     
     // Metadata
     let planType: String?
+    let planDetails: String?
     let rawObservedAt: String?
     
     var displayName: String {
         if !email.isEmpty { return email }
         return id
-    }
-    
-    var providerIcon: String {
-        switch provider.lowercased() {
-        case "claude": return "sparkle"
-        case "codex": return "cpu"
-        case "antigravity": return "atom"
-        case "meta": return "globe"
-        default: return "brain"
-        }
     }
 }
 
