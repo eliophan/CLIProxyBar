@@ -19,19 +19,10 @@ A native macOS menu bar utility for monitoring [CLIProxyAPI](https://github.com/
 ## Requirements
 
 - macOS 13.0 (Ventura) or later
+- Xcode Command Line Tools (`xcode-select --install`)
 - A running CLIProxyAPI instance
 
-## Installation
-
-### Option 1: Direct Download (Pre-built)
-
-1. Download the latest `CLIProxyBar.zip` from [Releases](https://github.com/phannhothinh/CLIProxyBar/releases).
-2. Unzip and drag `CLIProxyBar.app` to your `/Applications` folder.
-3. Open `CLIProxyBar.app`. *(If macOS displays an unidentified developer prompt on first launch: Right-click the app and choose **Open**).*
-
-### Option 2: Build from Source
-
-Requirements: Xcode Command Line Tools (`xcode-select --install`).
+## Build & Install
 
 ```bash
 git clone https://github.com/phannhothinh/CLIProxyBar.git
