@@ -211,31 +211,30 @@ struct MaskedEmailView: View {
     @State private var isRevealed: Bool = false
     
     private var parts: (prefix: String, middle: String, suffix: String) {
-        if let atIndex = email.firstIndex(of: "@") {
-            let user = String(email[..<atIndex])
-            let domain = String(email[atIndex...])
-            if user.count > 4 {
-                let pre = String(user.prefix(3))
-                let suf = String(user.suffix(2)) + domain
-                let mid = String(user.dropFirst(3).dropLast(2))
-                return (pre, mid, suf)
-            } else if user.count > 2 {
-                let pre = String(user.prefix(1))
-                let suf = domain
-                let mid = String(user.dropFirst(1))
-                return (pre, mid, suf)
-            } else {
-                return (user, "", domain)
-            }
-        } else {
-            if email.count > 6 {
-                let pre = String(email.prefix(2))
-                let suf = String(email.suffix(2))
-                let mid = String(email.dropFirst(2).dropLast(2))
-                return (pre, mid, suf)
-            }
+        let total = email.count
+        guard total >= 6 else {
             return (email, "", "")
         }
+        
+        let prefixLen: Int
+        let suffixLen: Int
+        
+        if total >= 20 {
+            prefixLen = 3
+            suffixLen = 7
+        } else if total >= 14 {
+            prefixLen = 2
+            suffixLen = 6
+        } else {
+            prefixLen = 1
+            suffixLen = 4
+        }
+        
+        let pre = String(email.prefix(prefixLen))
+        let suf = String(email.suffix(suffixLen))
+        let mid = String(email.dropFirst(prefixLen).dropLast(suffixLen))
+        
+        return (pre, mid, suf)
     }
     
     var body: some View {
