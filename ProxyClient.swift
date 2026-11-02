@@ -294,6 +294,13 @@ class ProxyClient: ObservableObject {
                 }
             }
             
+            // Check if cooldown is due to quota exhaustion / rate-limiting
+            let isQuotaCooldown = (f.cooldowns?.contains(where: {
+                $0.reason?.contains("quota") == true ||
+                $0.reason?.contains("rate_limit") == true ||
+                $0.httpStatus == 429
+            }) ?? false) && maxRemaining > 0
+            
             // Extract quota signals
             var primaryPercent: Double? = nil
             var primaryResetSec: Int? = nil
@@ -305,11 +312,33 @@ class ProxyClient: ObservableObject {
             
             if let signals = f.quota?.signals {
                 // Claude - calculate REMAINING % (100% - used%) to match official Web UI
+                var max5hUtil: Double = 0.0
                 if let p5hUtilStr = signals["Anthropic-Ratelimit-Unified-5h-Utilization"],
                    let p5hVal = Double(p5hUtilStr) {
-                    let used = min(max(p5hVal * 100.0, 0.0), 100.0)
+                    max5hUtil = max(max5hUtil, p5hVal)
+                }
+                // Inspect all model quotas for unified limit status
+                if let mq = f.modelQuotas {
+                    for (_, mQuota) in mq {
+                        if let mSignals = mQuota.signals {
+                            if mSignals["Anthropic-Ratelimit-Unified-5h-Status"] == "rejected" {
+                                max5hUtil = max(max5hUtil, 1.0)
+                            }
+                            if let mUtilStr = mSignals["Anthropic-Ratelimit-Unified-5h-Utilization"],
+                               let mVal = Double(mUtilStr) {
+                                max5hUtil = max(max5hUtil, mVal)
+                            }
+                        }
+                    }
+                }
+                
+                if isQuotaCooldown || max5hUtil >= 1.0 {
+                    primaryPercent = 0.0
+                } else {
+                    let used = min(max(max5hUtil * 100.0, 0.0), 100.0)
                     primaryPercent = max(100.0 - used, 0.0)
                 }
+                
                 if let p7dUtilStr = signals["Anthropic-Ratelimit-Unified-7d-Utilization"],
                    let p7dVal = Double(p7dUtilStr) {
                     let used = min(max(p7dVal * 100.0, 0.0), 100.0)
@@ -332,7 +361,9 @@ class ProxyClient: ObservableObject {
                 }
                 
                 // Codex - calculate REMAINING % (100% - used%)
-                if let pUsed = signals["X-Codex-Primary-Used-Percent"], let val = Double(pUsed) {
+                if isQuotaCooldown {
+                    primaryPercent = 0.0
+                } else if let pUsed = signals["X-Codex-Primary-Used-Percent"], let val = Double(pUsed) {
                     primaryPercent = max(100.0 - val, 0.0)
                 }
                 if maxRemaining > 0 {

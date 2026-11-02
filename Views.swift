@@ -619,36 +619,6 @@ struct ProviderLogoView: View {
     }
 }
 
-// MARK: - Clean Model Name Helper
-
-func formatLockedModels(_ rawModels: [String]) -> String {
-    let cleaned = rawModels.map { m -> String in
-        var name = m
-        // Claude cleaning
-        if name.starts(with: "claude-") {
-            name = String(name.dropFirst("claude-".count))
-        }
-        if name.hasSuffix("-5-5") {
-            name = String(name.dropLast("-5-5".count))
-        }
-        if name.hasSuffix("-high") {
-            name = String(name.dropLast("-high".count))
-        }
-        // Codex / GPT cleaning
-        if name.starts(with: "gpt-") {
-            name = String(name.dropFirst("gpt-".count))
-        }
-        if let dashIdx = name.firstIndex(of: "-") {
-            let prefix = name[..<dashIdx]
-            if Double(prefix) != nil {
-                name = String(name[name.index(after: dashIdx)...])
-            }
-        }
-        return name
-    }
-    return cleaned.joined(separator: ", ")
-}
-
 // MARK: - Account Row View (Clean Inset Row with Aligned Columns & Drag Affordance)
 
 struct AccountRowView: View {
@@ -738,21 +708,6 @@ struct AccountRowView: View {
                     Text(details)
                         .font(.system(size: 9, weight: .regular, design: .monospaced))
                         .foregroundColor(.secondary)
-                }
-                .padding(.top, 1)
-            }
-            
-            // Line 5: Locked Models (Refined and concise)
-            if !account.coolingModels.isEmpty {
-                HStack(spacing: 4) {
-                    Text("Locked:")
-                        .font(.system(size: 8.5, weight: .medium))
-                        .foregroundColor(Color(NSColor.systemOrange).opacity(0.85))
-                    
-                    Text(formatLockedModels(account.coolingModels))
-                        .font(.system(size: 8.5, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
                 }
                 .padding(.top, 1)
             }

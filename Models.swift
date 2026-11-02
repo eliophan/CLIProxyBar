@@ -63,6 +63,7 @@ struct RawAuthFile: Codable {
     let priority: Int?
     let provider: String?
     let quota: RawQuota?
+    let modelQuotas: [String: RawQuota]?
     let status: String?
 
     enum CodingKeys: String, CodingKey {
@@ -83,6 +84,7 @@ struct RawAuthFile: Codable {
         case priority
         case provider
         case quota
+        case modelQuotas = "model_quotas"
         case status
     }
 }
