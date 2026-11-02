@@ -26,6 +26,11 @@ class ProxyClient: ObservableObject {
     private var pollTimer: Timer?
     private var tickTimer: Timer?
     
+    // Live Anthropic usage cache matching Web Dashboard 1:1
+    private var claudeUsageCache: [String: (primaryPercent: Double, primaryResetSec: Int?, secPercent: Double?, secResetSec: Int?, date: Date)] = [:]
+    private var isFetchingClaudeUsage: Set<String> = []
+    private var latestRawFiles: [RawAuthFile] = []
+    
     var glanceAccounts: [NormalizedAccount] {
         if !pinnedAccountIds.isEmpty {
             return accounts.filter { pinnedAccountIds.contains($0.id) }
@@ -230,6 +235,85 @@ class ProxyClient: ObservableObject {
         self.soonestCooldownSeconds = minCooldown
     }
     
+    private func fetchLiveClaudeUsage(authIndex: String) async -> (primaryPercent: Double, primaryResetSec: Int?, secPercent: Double?, secResetSec: Int?)? {
+        guard let url = URL(string: "\(proxyURL)/v8/management/requests/api-call") else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(secretKey)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 4.0
+        
+        let payload: [String: Any] = [
+            "auth_index": authIndex,
+            "method": "GET",
+            "url": "https://api.anthropic.com/api/oauth/usage",
+            "header": [
+                "User-Agent": "claude-cli/2.1.280 (external, cli)",
+                "Authorization": "Bearer $TOKEN$",
+                "Content-Type": "application/json",
+                "anthropic-beta": "oauth-2025-04-20",
+                "Accept": "application/json"
+            ]
+        ]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+        req.httpBody = bodyData
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let bodyStr = json["body"] as? String,
+                  let bodyData = bodyStr.data(using: .utf8),
+                  let usageObj = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
+                return nil
+            }
+            
+            let isoFormatterFractional = ISO8601DateFormatter()
+            isoFormatterFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let isoFormatterStandard = ISO8601DateFormatter()
+            isoFormatterStandard.formatOptions = [.withInternetDateTime]
+            
+            func parseReset(_ dateStr: String?) -> Int? {
+                guard let str = dateStr, !str.isEmpty else { return nil }
+                if let d = isoFormatterFractional.date(from: str) ?? isoFormatterStandard.date(from: str) {
+                    return max(Int(d.timeIntervalSinceNow), 0)
+                }
+                return nil
+            }
+            
+            var pPct: Double? = nil
+            var pReset: Int? = nil
+            if let fiveHour = usageObj["five_hour"] as? [String: Any],
+               let util = fiveHour["utilization"] as? Double {
+                pPct = max(0.0, min(100.0, 100.0 - util))
+                pReset = parseReset(fiveHour["resets_at"] as? String)
+            }
+            
+            var sPct: Double? = nil
+            var sReset: Int? = nil
+            if let sevenDay = usageObj["seven_day"] as? [String: Any],
+               let util = sevenDay["utilization"] as? Double {
+                sPct = max(0.0, min(100.0, 100.0 - util))
+                sReset = parseReset(sevenDay["resets_at"] as? String)
+            }
+            
+            if let pPct = pPct {
+                return (pPct, pReset, sPct, sReset)
+            }
+        } catch {
+            return nil
+        }
+        return nil
+    }
+    
+    private func recordClaudeUsage(authIndex: String, result: (primaryPercent: Double, primaryResetSec: Int?, secPercent: Double?, secResetSec: Int?)?) {
+        isFetchingClaudeUsage.remove(authIndex)
+        if let res = result {
+            claudeUsageCache[authIndex] = (res.primaryPercent, res.primaryResetSec, res.secPercent, res.secResetSec, Date())
+            parseAndSetAccounts(latestRawFiles)
+        }
+    }
+    
     func fetchAuthFiles() async {
         guard let url = URL(string: "\(proxyURL)/v0/management/auth-files") else {
             statusMessage = "Invalid URL"
@@ -249,10 +333,26 @@ class ProxyClient: ObservableObject {
                 let result = try decoder.decode(AuthFilesResponse.self, from: data)
                 let rawFiles = result.files ?? []
                 
+                self.latestRawFiles = rawFiles
                 parseAndSetAccounts(rawFiles)
                 self.isConnected = true
                 self.lastUpdated = Date()
                 self.statusMessage = "Connected to CLIProxy (Port 8317)"
+                
+                // Fetch live Claude usage in background if cache is stale (>45s)
+                let now = Date()
+                for f in rawFiles {
+                    if f.provider?.lowercased() == "claude", let aIdx = f.authIndex, !aIdx.isEmpty {
+                        let isStale = self.claudeUsageCache[aIdx].map { now.timeIntervalSince($0.date) > 45.0 } ?? true
+                        if isStale && !self.isFetchingClaudeUsage.contains(aIdx) {
+                            self.isFetchingClaudeUsage.insert(aIdx)
+                            Task { @MainActor [weak self] in
+                                let res = await self?.fetchLiveClaudeUsage(authIndex: aIdx)
+                                self?.recordClaudeUsage(authIndex: aIdx, result: res)
+                            }
+                        }
+                    }
+                }
             } else {
                 let code = (response as? HTTPURLResponse)?.statusCode ?? 0
                 self.isConnected = false
@@ -278,6 +378,8 @@ class ProxyClient: ObservableObject {
             let path = f.path ?? ""
             let prio = f.priority ?? 0
             let disabled = f.disabled ?? false
+            let normProv = resolveProviderLogoName(prov)
+            let authIdx = f.authIndex ?? ""
             
             // Extract cooldowns
             var maxRemaining = 0
@@ -310,81 +412,76 @@ class ProxyClient: ObservableObject {
             var planType: String? = nil
             var planDetails: String? = nil
             
-            if let signals = f.quota?.signals {
-                // Claude - calculate REMAINING % (100% - used%) to match official Web UI
-                var max5hUtil: Double = 0.0
-                if let p5hUtilStr = signals["Anthropic-Ratelimit-Unified-5h-Utilization"],
-                   let p5hVal = Double(p5hUtilStr) {
-                    max5hUtil = max(max5hUtil, p5hVal)
-                }
-                // Inspect all model quotas for unified limit status
-                if let mq = f.modelQuotas {
-                    for (_, mQuota) in mq {
-                        if let mSignals = mQuota.signals {
-                            if mSignals["Anthropic-Ratelimit-Unified-5h-Status"] == "rejected" {
-                                max5hUtil = max(max5hUtil, 1.0)
-                            }
-                            if let mUtilStr = mSignals["Anthropic-Ratelimit-Unified-5h-Utilization"],
-                               let mVal = Double(mUtilStr) {
-                                max5hUtil = max(max5hUtil, mVal)
+            if normProv == "claude" {
+                // Priority 1: Check live Anthropic OAuth usage cache (matches Web Dashboard 1:1)
+                if let live = claudeUsageCache[authIdx] {
+                    primaryPercent = live.primaryPercent
+                    primaryResetSec = live.primaryResetSec
+                    secondaryPercent = live.secPercent
+                    secondaryResetSec = live.secResetSec
+                } else if let signals = f.quota?.signals {
+                    // Priority 2: Use direct unified signals from quota (never modelQuotas)
+                    if let p5hUtilStr = signals["Anthropic-Ratelimit-Unified-5h-Utilization"],
+                       let p5hVal = Double(p5hUtilStr) {
+                        let p5hResetEpoch = Int(signals["Anthropic-Ratelimit-Unified-5h-Reset"] ?? "") ?? 0
+                        if p5hResetEpoch > 0 && p5hResetEpoch <= nowEpoch {
+                            // Rolling 5-hour limit reset has already occurred
+                            primaryPercent = 100.0
+                            primaryResetSec = 0
+                        } else {
+                            let used = min(max(p5hVal * 100.0, 0.0), 100.0)
+                            primaryPercent = max(100.0 - used, 0.0)
+                            if p5hResetEpoch > 0 {
+                                primaryResetSec = max(p5hResetEpoch - nowEpoch, 0)
                             }
                         }
                     }
+                    if let p7dUtilStr = signals["Anthropic-Ratelimit-Unified-7d-Utilization"],
+                       let p7dVal = Double(p7dUtilStr) {
+                        let used = min(max(p7dVal * 100.0, 0.0), 100.0)
+                        secondaryPercent = max(100.0 - used, 0.0)
+                    }
+                    if let p7dResetStr = signals["Anthropic-Ratelimit-Unified-7d-Reset"],
+                       let p7dResetEpoch = Int(p7dResetStr) {
+                        secondaryResetSec = max(p7dResetEpoch - nowEpoch, 0)
+                    }
+                    primaryStatus = signals["Anthropic-Ratelimit-Unified-5h-Status"]
                 }
                 
-                if isQuotaCooldown || max5hUtil >= 1.0 {
+                // If in active cooldown, override remaining percentage with 0% and countdown
+                if isQuotaCooldown && maxRemaining > 0 {
                     primaryPercent = 0.0
-                } else {
-                    let used = min(max(max5hUtil * 100.0, 0.0), 100.0)
-                    primaryPercent = max(100.0 - used, 0.0)
-                }
-                
-                if let p7dUtilStr = signals["Anthropic-Ratelimit-Unified-7d-Utilization"],
-                   let p7dVal = Double(p7dUtilStr) {
-                    let used = min(max(p7dVal * 100.0, 0.0), 100.0)
-                    secondaryPercent = max(100.0 - used, 0.0)
-                }
-                if let p7dResetStr = signals["Anthropic-Ratelimit-Unified-7d-Reset"],
-                   let p7dResetEpoch = Int(p7dResetStr) {
-                    secondaryResetSec = max(p7dResetEpoch - nowEpoch, 0)
-                }
-                primaryStatus = signals["Anthropic-Ratelimit-Unified-5h-Status"]
-                
-                // Set primary reset countdown: if in cooldown, use the exact remaining seconds!
-                if maxRemaining > 0 {
                     primaryResetSec = maxRemaining
-                } else if let p5hResetStr = signals["Anthropic-Ratelimit-Unified-5h-Reset"],
-                          let p5hResetEpoch = Int(p5hResetStr) {
-                    primaryResetSec = max(p5hResetEpoch - nowEpoch, 0)
-                } else if let retryAfterStr = signals["Retry-After"], let retrySec = Int(retryAfterStr) {
-                    primaryResetSec = retrySec
-                }
-                
-                // Codex - calculate REMAINING % (100% - used%)
-                if isQuotaCooldown {
-                    primaryPercent = 0.0
-                } else if let pUsed = signals["X-Codex-Primary-Used-Percent"], let val = Double(pUsed) {
-                    primaryPercent = max(100.0 - val, 0.0)
-                }
-                if maxRemaining > 0 {
+                } else if primaryResetSec == nil && maxRemaining > 0 {
                     primaryResetSec = maxRemaining
-                } else if let pResetSec = signals["X-Codex-Primary-Reset-After-Seconds"], let val = Int(pResetSec) {
-                    primaryResetSec = val
                 }
-                
-                if let sUsed = signals["X-Codex-Secondary-Used-Percent"], let val = Double(sUsed) {
-                    secondaryPercent = max(100.0 - val, 0.0)
-                }
-                if let sResetSec = signals["X-Codex-Secondary-Reset-After-Seconds"], let val = Int(sResetSec) {
-                    secondaryResetSec = val
-                }
-                if let plan = signals["X-Codex-Plan-Type"] {
-                    planType = plan.capitalized
+            } else if normProv == "codex" {
+                if let signals = f.quota?.signals {
+                    if isQuotaCooldown && maxRemaining > 0 {
+                        primaryPercent = 0.0
+                        primaryResetSec = maxRemaining
+                    } else if let pUsed = signals["X-Codex-Primary-Used-Percent"], let val = Double(pUsed) {
+                        primaryPercent = max(100.0 - val, 0.0)
+                        if maxRemaining > 0 {
+                            primaryResetSec = maxRemaining
+                        } else if let pResetSec = signals["X-Codex-Primary-Reset-After-Seconds"], let val = Int(pResetSec) {
+                            primaryResetSec = val
+                        }
+                    }
+                    
+                    if let sUsed = signals["X-Codex-Secondary-Used-Percent"], let val = Double(sUsed) {
+                        secondaryPercent = max(100.0 - val, 0.0)
+                        if let sResetSec = signals["X-Codex-Secondary-Reset-After-Seconds"], let val = Int(sResetSec) {
+                            secondaryResetSec = val
+                        }
+                    }
+                    if let plan = signals["X-Codex-Plan-Type"] {
+                        planType = plan.capitalized
+                    }
                 }
             }
             
             // Extract local metadata for providers without usage signals
-            let normProv = resolveProviderLogoName(prov)
             if primaryPercent == nil && !path.isEmpty && FileManager.default.fileExists(atPath: path) {
                 if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
